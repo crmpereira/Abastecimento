@@ -1,0 +1,11 @@
+.home/
+**/__pycache__/
+**/*.pyc
+
+FrontEnd/node_modules/
+FrontEnd/.expo/
+FrontEnd/.expo-shared/
+FrontEnd/dist/
+FrontEnd/build/
+
+Processamento/gemini_api_key.txt

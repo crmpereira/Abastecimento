@@ -1,0 +1,133 @@
+{
+    "processado_em": "2026-03-31T16:46:36-03:00",
+    "postos": [
+        {
+            "id": "posto1",
+            "arquivo": "IMG_20260330_101538.jpg",
+            "coordenadas": {
+                "lat": -26.2945056,
+                "lon": -48.8158306,
+                "timestamp_foto": "2026-03-30T10:15:38"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.99,
+                "gasolina_comum": 6.79,
+                "etanol": 4.99,
+                "diesel_s10": 7.09,
+                "diesel_s500": null
+            }
+        },
+        {
+            "id": "posto2",
+            "arquivo": "IMG_20260330_101736.jpg",
+            "coordenadas": {
+                "lat": -26.2837417,
+                "lon": -48.810225,
+                "timestamp_foto": "2026-03-30T10:17:36"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.99,
+                "gasolina_comum": 6.79,
+                "etanol": 4.97,
+                "diesel_s10": 7.79,
+                "diesel_s500": 7.44
+            }
+        },
+        {
+            "id": "posto3",
+            "arquivo": "IMG_20260330_102216.jpg",
+            "coordenadas": {
+                "lat": -26.2999889,
+                "lon": -48.8230111,
+                "timestamp_foto": "2026-03-30T10:22:17"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.99,
+                "gasolina_comum": 6.79,
+                "etanol": 4.99,
+                "diesel_s10": 7.49,
+                "diesel_s500": null
+            }
+        },
+        {
+            "id": "posto4",
+            "arquivo": "IMG_20260330_102417.jpg",
+            "coordenadas": {
+                "lat": -26.3060444,
+                "lon": -48.8292444,
+                "timestamp_foto": "2026-03-30T10:24:17"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.55,
+                "gasolina_comum": 6.55,
+                "etanol": 4.55,
+                "diesel_s10": 6.99,
+                "diesel_s500": 6.97
+            }
+        },
+        {
+            "id": "posto5",
+            "arquivo": "IMG_20260331_105445.jpg",
+            "coordenadas": {
+                "lat": -26.2835028,
+                "lon": -48.8029083,
+                "timestamp_foto": "2026-03-31T10:54:45"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.99,
+                "gasolina_comum": 6.79,
+                "etanol": 4.97,
+                "diesel_s10": 7.3,
+                "diesel_s500": null
+            }
+        },
+        {
+            "id": "posto6",
+            "arquivo": "IMG_20260331_105611.jpg",
+            "coordenadas": {
+                "lat": -26.2837722,
+                "lon": -48.8103,
+                "timestamp_foto": "2026-03-31T10:56:11"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.99,
+                "gasolina_comum": 6.79,
+                "etanol": 4.97,
+                "diesel_s10": 7.79,
+                "diesel_s500": 7.44
+            }
+        },
+        {
+            "id": "posto7",
+            "arquivo": "IMG_20260331_110011.jpg",
+            "coordenadas": {
+                "lat": -26.3000167,
+                "lon": -48.8229944,
+                "timestamp_foto": "2026-03-31T11:00:11"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.99,
+                "gasolina_comum": 6.79,
+                "etanol": 4.99,
+                "diesel_s10": 7.49,
+                "diesel_s500": null
+            }
+        },
+        {
+            "id": "posto8",
+            "arquivo": "IMG_20260331_110232.jpg",
+            "coordenadas": {
+                "lat": -26.3059917,
+                "lon": -48.8292222,
+                "timestamp_foto": "2026-03-31T11:02:32"
+            },
+            "precos": {
+                "gasolina_aditivada": 6.55,
+                "gasolina_comum": 6.55,
+                "etanol": 4.55,
+                "diesel_s10": 6.99,
+                "diesel_s500": 6.97
+            }
+        }
+    ]
+}

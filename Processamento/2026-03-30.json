@@ -1,0 +1,23 @@
+{
+    "processado_em": "2026-03-30T16:22:28-03:00",
+    "total_postos": 4,
+    "postos": [
+        {
+            "id": "posto1",
+            "arquivo": "IMG_20260330_101538.jpg",
+            "coordenadas": {
+                "lat": -26.2945056,
+                "lon": -48.8158306,
+                "timestamp_foto": "2026-03-30 10:15:38"
+            },
+            "combustiveis": {
+                "gasolina_aditivada": 6.99,
+                "gasolina_comum": 6.79,
+                "etanol": 4.99,
+                "diesel_s10": 7.09,
+                "diesel_s500": null
+            }
+        }
+        // ... outros postos seguem o mesmo padrão
+    ]
+}
