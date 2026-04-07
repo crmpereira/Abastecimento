@@ -13,12 +13,16 @@ export default function App() {
   const theme = useMemo(() => {
     return {
       ...MD3LightTheme,
+      roundness: 14,
       colors: {
         ...MD3LightTheme.colors,
-        primary: "#1E88E5",
-        secondary: "#00A884",
-        background: "#F5F7FB",
+        primary: "#2563EB",
+        secondary: "#16A34A",
+        tertiary: "#F97316",
+        background: "#F6F7FB",
         surface: "#FFFFFF",
+        surfaceVariant: "#F1F3F8",
+        outlineVariant: "#E2E8F0",
       },
     };
   }, []);
