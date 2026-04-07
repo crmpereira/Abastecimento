@@ -42,18 +42,34 @@ def _datas_disponiveis():
     pasta = _processamento_dir()
     if not os.path.exists(pasta):
         return []
-    datas = []
+    datas = set()
     for nome in os.listdir(pasta):
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}\.json", nome):
-            datas.append(nome[:-5])
-    datas.sort()
-    return datas
+        m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?:_\d{6})?\.json", nome)
+        if m:
+            datas.add(m.group(1))
+    return sorted(datas)
 
-def _arquivo_mais_recente():
-    datas = _datas_disponiveis()
-    if not datas:
+def _arquivo_mais_recente(data_str: str | None = None):
+    pasta = _processamento_dir()
+    if not os.path.exists(pasta):
         return None
-    return _arquivo_do_dia(datas[-1])
+
+    candidatos: list[tuple[str, str, str]] = []
+    for nome in os.listdir(pasta):
+        m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?:_(\d{6}))?\.json", nome)
+        if not m:
+            continue
+        dia = m.group(1)
+        hora = m.group(2) or "000000"
+        if data_str and dia != data_str:
+            continue
+        candidatos.append((dia, hora, os.path.join(pasta, nome)))
+
+    if not candidatos:
+        return None
+
+    candidatos.sort()
+    return candidatos[-1][2]
 
 
 def _arquivo_do_dia(data_str=None):
@@ -63,16 +79,17 @@ def _arquivo_do_dia(data_str=None):
 
 
 def _carregar_json(data_str=None):
-    caminho = _arquivo_do_dia(data_str)
-    if not os.path.exists(caminho):
-        if not data_str:
-            caminho_mais_recente = _arquivo_mais_recente()
-            if caminho_mais_recente and os.path.exists(caminho_mais_recente):
-                caminho = caminho_mais_recente
-            else:
-                raise HTTPException(status_code=404, detail="Nenhum arquivo JSON encontrado")
-        else:
-            raise HTTPException(status_code=404, detail="Arquivo do dia não encontrado")
+    if data_str:
+        caminho = _arquivo_do_dia(data_str)
+        if not os.path.exists(caminho):
+            caminho = _arquivo_mais_recente(data_str)
+            if not caminho or not os.path.exists(caminho):
+                raise HTTPException(status_code=404, detail="Arquivo do dia não encontrado")
+    else:
+        hoje = datetime.date.today().isoformat()
+        caminho = _arquivo_mais_recente(hoje) or _arquivo_mais_recente()
+        if not caminho or not os.path.exists(caminho):
+            raise HTTPException(status_code=404, detail="Nenhum arquivo JSON encontrado")
     with open(caminho, "r", encoding="utf-8") as f:
         try:
             return json.load(f)
