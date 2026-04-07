@@ -51,6 +51,28 @@ Observações:
 
 - O modelo do Gemini pode ser alterado via variável de ambiente GEMINI_MODEL.
 
+### Por que fotos? (decisão de processamento)
+
+- Postos não possuem uma API pública e padronizada para preços.
+- Para ter cobertura universal, o processo utiliza fotos de placas/bombas e extrai:
+  - Coordenadas e data/hora via metadados EXIF.
+  - Preços via IA (Gemini), gerando um JSON diário consumido pelo BackEnd/FrontEnd.
+- Benefícios: funciona com qualquer posto e não depende de integração proprietária.
+- Limitações: qualidade da foto (iluminação/ângulo), custos/limites da IA e tempo de processamento.
+- Mitigações implementadas:
+  - Esperas configuráveis entre fotos e em caso de limite (429) para reduzir erros.
+  - Execução sem IA para testes: se definir `PROCESSAMENTO_SEM_IA=1`, os preços saem como `null` (gera somente EXIF).
+
+Variáveis úteis:
+
+```bash
+# Define o modelo Gemini usado na extração
+GEMINI_MODEL=gemini-1.5-flash
+
+# Desativa a IA (somente EXIF, preços = null) — útil para testes
+PROCESSAMENTO_SEM_IA=1
+```
+
 ## BackEnd (FastAPI + Swagger)
 
 1) Instalar dependências:
