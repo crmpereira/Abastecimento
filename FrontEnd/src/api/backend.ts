@@ -8,6 +8,17 @@ export type PostoApi = {
     lon: number | null;
     timestamp_foto: string | null;
   };
+  endereco?: {
+    display?: string | null;
+    rua?: string | null;
+    numero?: string | null;
+    bairro?: string | null;
+    cidade?: string | null;
+    uf?: string | null;
+    cep?: string | null;
+    pais?: string | null;
+    provider?: string | null;
+  } | null;
   precos?: {
     gasolina_aditivada: number | null;
     gasolina_comum: number | null;
@@ -15,6 +26,15 @@ export type PostoApi = {
     diesel_s10: number | null;
     diesel_s500: number | null;
   };
+};
+
+export type CombustivelFiltro = "gasolina" | "etanol" | "diesel";
+
+export type PostosResumoApi = {
+  data: string | null;
+  total: number;
+  combustivel: CombustivelFiltro | null;
+  postos: PostoApi[];
 };
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
@@ -76,4 +96,34 @@ export async function fetchPostos(): Promise<PostoApi[]> {
     return [];
   }
   return data as PostoApi[];
+}
+
+export async function fetchPostosPorCombustivel(combustivel: CombustivelFiltro): Promise<PostoApi[]> {
+  const baseUrl = getApiBaseUrl();
+  const qs = new URLSearchParams({ combustivel });
+  const res = await fetch(`${baseUrl}/api/postos?${qs.toString()}`, { headers: buildHeaders() });
+  if (!res.ok) {
+    throw new Error(`Falha ao buscar postos: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!Array.isArray(data)) {
+    return [];
+  }
+  return data as PostoApi[];
+}
+
+export async function fetchPostosResumoPorCombustivel(
+  combustivel: CombustivelFiltro
+): Promise<PostosResumoApi> {
+  const baseUrl = getApiBaseUrl();
+  const qs = new URLSearchParams({ combustivel });
+  const res = await fetch(`${baseUrl}/api/postos_resumo?${qs.toString()}`, { headers: buildHeaders() });
+  if (!res.ok) {
+    throw new Error(`Falha ao buscar postos: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!data || typeof data !== "object") {
+    return { data: null, total: 0, combustivel: null, postos: [] };
+  }
+  return data as PostosResumoApi;
 }

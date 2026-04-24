@@ -5,6 +5,8 @@ import os
 import re
 import time
 import datetime
+import urllib.parse
+import urllib.request
 from PIL import Image, ExifTags
 
 # ─────────────────────────────────────────────
@@ -16,6 +18,7 @@ FAIXA_PRECO_MIN = 2.0
 FAIXA_PRECO_MAX = 15.0
 ESPERA_ENTRE_FOTOS = 15   # segundos
 ESPERA_RATE_LIMIT = 60    # segundos ao receber erro 429
+ESPERA_GEOCODE = 1        # segundos entre chamadas de geocodificação
 
 
 def _env_bool(nome: str) -> bool:
@@ -31,6 +34,9 @@ def _env_int(nome: str, padrao: int) -> int:
         return int(v)
     except ValueError:
         return padrao
+
+def _env_str(nome: str) -> str:
+    return os.getenv(nome, "").strip()
 
 
 def configurar_log(base_dir: str) -> logging.Logger:
@@ -211,6 +217,111 @@ def extrair_localizacao_geografica(caminho_imagem: str) -> dict | None:
     except Exception:
         return None
 
+def _extrair_dia_da_foto(caminho_imagem: str, nome_arquivo: str) -> str | None:
+    """
+    Retorna o dia (YYYY-MM-DD) da foto.
+    Prioridade:
+    1) EXIF DateTimeOriginal/DateTime
+    2) Nome do arquivo (ex.: IMG_20260331_110232.jpg -> 2026-03-31)
+    3) mtime do arquivo
+    """
+    try:
+        with Image.open(caminho_imagem) as img:
+            exif = img.getexif()
+            if exif:
+                for tag_id, tag_name in ExifTags.TAGS.items():
+                    if tag_name in ("DateTimeOriginal", "DateTime"):
+                        valor = exif.get(tag_id)
+                        dia = _normalizar_data(valor)
+                        if dia:
+                            return dia
+    except Exception:
+        pass
+
+    m = re.search(r"_(\d{8})_", nome_arquivo)
+    if m:
+        ymd = m.group(1)
+        return f"{ymd[0:4]}-{ymd[4:6]}-{ymd[6:8]}"
+
+    try:
+        dt = datetime.datetime.fromtimestamp(os.path.getmtime(caminho_imagem)).date()
+        return dt.isoformat()
+    except Exception:
+        return None
+
+def _reverse_geocode_nominatim(
+    lat: float,
+    lon: float,
+    logger: logging.Logger,
+    cache: dict[tuple[float, float], dict],
+    last_call: list[float],
+    espera_geocode: int,
+) -> dict | None:
+    key = (round(float(lat), 6), round(float(lon), 6))
+    if key in cache:
+        return cache[key]
+
+    if espera_geocode > 0 and last_call:
+        delta = time.monotonic() - last_call[0]
+        if delta < espera_geocode:
+            time.sleep(espera_geocode - delta)
+
+    qs = urllib.parse.urlencode(
+        {
+            "format": "jsonv2",
+            "lat": str(lat),
+            "lon": str(lon),
+            "addressdetails": "1",
+        }
+    )
+    url = f"https://nominatim.openstreetmap.org/reverse?{qs}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "AbasteceAqui/1.0",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+
+    try:
+        last_call[:] = [time.monotonic()]
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        logger.warning(f"Falha ao buscar endereço (nominatim) para {lat},{lon}: {e}")
+        return None
+
+    addr = payload.get("address") if isinstance(payload, dict) else None
+    if not isinstance(addr, dict):
+        cache[key] = {"display": payload.get("display_name") if isinstance(payload, dict) else None}
+        return cache[key]
+
+    rua = addr.get("road") or addr.get("pedestrian") or addr.get("street") or addr.get("path")
+    numero = addr.get("house_number")
+    bairro = addr.get("suburb") or addr.get("neighbourhood") or addr.get("district")
+    cidade = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality")
+    uf = addr.get("state")
+    cep = addr.get("postcode")
+    pais = addr.get("country")
+
+    linha1 = f"{rua}, {numero}" if rua and numero else (rua or None)
+    linha2 = " - ".join([p for p in [bairro, cidade] if p])
+    display = " | ".join([p for p in [linha1, linha2, uf, cep, pais] if p]) or payload.get("display_name")
+
+    cache[key] = {
+        "display": display,
+        "rua": rua,
+        "numero": numero,
+        "bairro": bairro,
+        "cidade": cidade,
+        "uf": uf,
+        "cep": cep,
+        "pais": pais,
+        "provider": "nominatim",
+    }
+    return cache[key]
+
 
 # ─────────────────────────────────────────────
 # Configuração do modelo
@@ -356,6 +467,24 @@ def _precos_para_snake_case(precos_raw: dict) -> dict:
 
     return saida
 
+def _precos_ja_padronizados(precos_raw: dict) -> dict | None:
+    if not isinstance(precos_raw, dict):
+        return None
+    chaves = {
+        "gasolina_aditivada",
+        "gasolina_comum",
+        "etanol",
+        "diesel_s10",
+        "diesel_s500",
+    }
+    if not any(k in precos_raw for k in chaves):
+        return None
+    saida = {k: None for k in chaves}
+    for k in chaves:
+        if k in precos_raw:
+            saida[k] = validar_preco(precos_raw.get(k))
+    return saida
+
 
 # ─────────────────────────────────────────────
 # Montagem do JSON final
@@ -374,10 +503,122 @@ def montar_json_final(processado_em: str, itens_posto: list) -> dict:
         "postos": itens_posto,
     }
 
+def _arquivo_json_mais_recente_com_precos(base_dir: str) -> str | None:
+    nomes = []
+    for nome in os.listdir(base_dir):
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:_\d{6})?\.json", nome):
+            nomes.append(nome)
+    if not nomes:
+        return None
+
+    candidatos = []
+    for nome in nomes:
+        caminho = os.path.join(base_dir, nome)
+        try:
+            with open(caminho, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+        except Exception:
+            continue
+        postos = dados.get("postos") if isinstance(dados, dict) else None
+        if not isinstance(postos, list):
+            continue
+        tem_preco = False
+        for p in postos:
+            if not isinstance(p, dict):
+                continue
+            precos = p.get("precos") or p.get("combustiveis")
+            if isinstance(precos, dict) and any(v is not None for v in precos.values()):
+                tem_preco = True
+                break
+        if tem_preco:
+            try:
+                candidatos.append((os.path.getmtime(caminho), caminho))
+            except Exception:
+                candidatos.append((0, caminho))
+
+    if not candidatos:
+        return None
+    candidatos.sort()
+    return candidatos[-1][1]
+
+def _carregar_precos_fallback(base_dir: str, logger: logging.Logger) -> dict[str, dict]:
+    """
+    Carrega um mapa arquivo->precos usando o JSON mais recente no diretório que contenha preços.
+    Usado como fallback quando a IA estiver indisponível (ex.: erro 429) ou retornar valores incompletos.
+    """
+    caminho = os.getenv("PRECOS_FALLBACK_JSON", "").strip()
+    if not caminho:
+        caminho = _arquivo_json_mais_recente_com_precos(base_dir) or ""
+    if not caminho:
+        return {}
+    if not os.path.isabs(caminho):
+        caminho = os.path.join(base_dir, caminho)
+    if not os.path.exists(caminho):
+        logger.warning(f"PRECOS_FALLBACK_JSON aponta para '{caminho}', mas o arquivo não existe.")
+        return {}
+
+    try:
+        with open(caminho, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+    except Exception:
+        logger.warning(f"Falha ao ler fallback de preços em '{caminho}'.")
+        return {}
+
+    postos = dados.get("postos") if isinstance(dados, dict) else None
+    if not isinstance(postos, list):
+        return {}
+
+    mapa: dict[str, dict] = {}
+    for p in postos:
+        if not isinstance(p, dict):
+            continue
+        arq = p.get("arquivo")
+        if not isinstance(arq, str) or not arq.strip():
+            continue
+        precos = p.get("precos") or p.get("combustiveis")
+        if not isinstance(precos, dict):
+            continue
+        precos_std = _precos_ja_padronizados(precos) or _precos_para_snake_case(precos)
+        if any(v is not None for v in precos_std.values()):
+            mapa[arq] = precos_std
+
+    if mapa:
+        logger.info(f"Fallback de preços carregado: {os.path.basename(caminho)} ({len(mapa)} itens)")
+    return mapa
+
+def _mesclar_precos(base: dict, fallback: dict | None) -> dict:
+    if not isinstance(base, dict):
+        base = {}
+    if not isinstance(fallback, dict):
+        return base
+    saida = dict(base)
+    for k, v in fallback.items():
+        if saida.get(k) is None and v is not None:
+            saida[k] = v
+    return saida
+
+def _limpar_arquivos_do_dia(base_dir: str, dia: str, manter: str, logger: logging.Logger) -> None:
+    """
+    Mantém apenas um arquivo JSON por dia (YYYY-MM-DD.json).
+    Remove arquivos do mesmo dia com sufixo de horário (YYYY-MM-DD_HHMMSS.json).
+    """
+    padrao = re.compile(rf"{re.escape(dia)}_(\d{{6}})\.json$")
+    for nome in os.listdir(base_dir):
+        if not padrao.fullmatch(nome):
+            continue
+        caminho = os.path.join(base_dir, nome)
+        if os.path.normcase(caminho) == os.path.normcase(manter):
+            continue
+        try:
+            os.remove(caminho)
+            logger.info(f"Removido arquivo antigo do dia: {nome}")
+        except Exception:
+            pass
 
 # ─────────────────────────────────────────────
 # Pipeline principal
 # ─────────────────────────────────────────────
+
 
 def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -389,15 +630,18 @@ def main():
     sem_ia = _env_bool("PROCESSAMENTO_SEM_IA")
     espera_entre_fotos = _env_int("ESPERA_ENTRE_FOTOS", ESPERA_ENTRE_FOTOS)
     espera_rate_limit = _env_int("ESPERA_RATE_LIMIT", ESPERA_RATE_LIMIT)
+    espera_geocode = _env_int("ESPERA_GEOCODE", ESPERA_GEOCODE)
+    geocode_provider = (_env_str("GEOCODE_PROVIDER") or "nominatim").lower()
 
-    # Nome do arquivo inclui horário para evitar sobrescrita
     ts = agora.strftime("%Y-%m-%d_%H%M%S")
-    arquivo_saida = os.path.join(base_dir, f"{ts}.json")
+    arquivo_saida_tmp = os.path.join(base_dir, f"{ts}.tmp.json")
 
     # ── Chave e modelo ──────────────────────────────
     model = None
     if sem_ia:
-        logger.warning("PROCESSAMENTO_SEM_IA=1 ativo: preços serão gerados como null (somente EXIF).")
+        logger.warning(
+            "PROCESSAMENTO_SEM_IA=1 ativo: IA desativada (somente EXIF). Se houver fallback, os preços serão preenchidos a partir dele."
+        )
     else:
         api_key = carregar_api_key(base_dir)
         if not api_key:
@@ -414,10 +658,7 @@ def main():
         logger.error(f"Pasta '{pasta_fotos}' não encontrada.")
         return
 
-    fotos = sorted(
-        f for f in os.listdir(pasta_fotos)
-        if f.lower().endswith((".png", ".jpg", ".jpeg"))
-    )
+    fotos = sorted(f for f in os.listdir(pasta_fotos) if f.lower().endswith((".png", ".jpg", ".jpeg")))
     total = len(fotos)
     logger.info(f"Total de fotos encontradas: {total}")
 
@@ -425,7 +666,36 @@ def main():
         logger.warning("Nenhuma foto encontrada. Encerrando.")
         return
 
+    fotos_com_dia: list[tuple[str, str]] = []
+    for nome_arq in fotos:
+        caminho = os.path.join(pasta_fotos, nome_arq)
+        dia_foto = _extrair_dia_da_foto(caminho, nome_arq)
+        if dia_foto:
+            fotos_com_dia.append((dia_foto, nome_arq))
+
+    if fotos_com_dia:
+        dia_alvo = max(d for d, _ in fotos_com_dia)
+        fotos = [nome for d, nome in fotos_com_dia if d == dia_alvo]
+        logger.info(f"Dia alvo (mais recente): {dia_alvo} | Fotos selecionadas: {len(fotos)}")
+    else:
+        dia_alvo = agora.strftime("%Y-%m-%d")
+        logger.warning("Não foi possível identificar o dia das fotos. Processando todas as imagens encontradas.")
+
+    dia = dia_alvo
+    arquivo_saida_final = os.path.join(base_dir, f"{dia}.json")
+    total = len(fotos)
+
     lista_postos = []
+    precos_fallback_por_arquivo = _carregar_precos_fallback(base_dir, logger)
+    if sem_ia and not precos_fallback_por_arquivo:
+        logger.error(
+            "PROCESSAMENTO_SEM_IA=1 ativo e nenhum fallback de preços encontrado. "
+            "Abortando para não gerar JSON sem preços."
+        )
+        return
+
+    endereco_cache: dict[tuple[float, float], dict] = {}
+    last_geocode_call: list[float] = []
 
     for i, nome_arq in enumerate(fotos, start=1):
         caminho = os.path.join(pasta_fotos, nome_arq)
@@ -463,6 +733,24 @@ def main():
             "lat": None, "lon": None, "timestamp_foto": None
         }
         precos_std = _precos_para_snake_case(precos_raw)
+        precos_std = _mesclar_precos(precos_std, precos_fallback_por_arquivo.get(nome_arq))
+
+        endereco = None
+        lat = loc.get("lat")
+        lon = loc.get("lon")
+        if (
+            geocode_provider == "nominatim"
+            and isinstance(lat, (int, float))
+            and isinstance(lon, (int, float))
+        ):
+            endereco = _reverse_geocode_nominatim(
+                float(lat),
+                float(lon),
+                logger,
+                endereco_cache,
+                last_geocode_call,
+                espera_geocode,
+            )
 
         item = {
             "id": f"posto{i}",
@@ -472,11 +760,12 @@ def main():
                 "lon": loc.get("lon"),
                 "timestamp_foto": loc.get("timestamp_foto"),
             },
+            "endereco": endereco,
             "precos": precos_std,
         }
         lista_postos.append(item)
 
-        if precos_raw:
+        if any(v is not None for v in precos_std.values()):
             logger.info(f"   OK: {precos_std}")
         else:
             logger.warning(f"   Sem preços válidos para '{nome_arq}'.")
@@ -488,10 +777,21 @@ def main():
 
     # ── Salva resultado ─────────────────────────────
     saida = montar_json_final(processado_em, lista_postos)
-    with open(arquivo_saida, "w", encoding="utf-8") as f:
+    with open(arquivo_saida_tmp, "w", encoding="utf-8") as f:
         json.dump(saida, f, indent=4, ensure_ascii=False)
 
-    logger.info(f"\nConcluído! Resultado salvo em: {arquivo_saida}")
+    try:
+        os.replace(arquivo_saida_tmp, arquivo_saida_final)
+    except Exception:
+        try:
+            os.remove(arquivo_saida_tmp)
+        except Exception:
+            pass
+        raise
+
+    _limpar_arquivos_do_dia(base_dir, dia, arquivo_saida_final, logger)
+
+    logger.info(f"\nConcluído! Resultado salvo em: {arquivo_saida_final}")
 
 
 if __name__ == "__main__":

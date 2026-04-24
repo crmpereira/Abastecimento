@@ -1,29 +1,51 @@
 {
-    "processado_em": "2026-03-31T16:46:36-03:00",
+    "processado_em": "2026-04-24T16:23:57-03:00",
     "postos": [
         {
             "id": "posto1",
-            "arquivo": "IMG_20260330_101538.jpg",
+            "arquivo": "IMG_20260331_105445.jpg",
             "coordenadas": {
-                "lat": -26.2945056,
-                "lon": -48.8158306,
-                "timestamp_foto": "2026-03-30T10:15:38"
+                "lat": -26.2835028,
+                "lon": -48.8029083,
+                "timestamp_foto": "2026-03-31T10:54:45"
+            },
+            "endereco": {
+                "display": "Rua Apucarana, 713 | Comasa - Joinville | Santa Catarina | 89228-070 | Brasil",
+                "rua": "Rua Apucarana",
+                "numero": "713",
+                "bairro": "Comasa",
+                "cidade": "Joinville",
+                "uf": "Santa Catarina",
+                "cep": "89228-070",
+                "pais": "Brasil",
+                "provider": "nominatim"
             },
             "precos": {
                 "gasolina_aditivada": 6.99,
                 "gasolina_comum": 6.79,
-                "etanol": 4.99,
-                "diesel_s10": 7.09,
+                "etanol": 4.97,
+                "diesel_s10": 7.3,
                 "diesel_s500": null
             }
         },
         {
             "id": "posto2",
-            "arquivo": "IMG_20260330_101736.jpg",
+            "arquivo": "IMG_20260331_105611.jpg",
             "coordenadas": {
-                "lat": -26.2837417,
-                "lon": -48.810225,
-                "timestamp_foto": "2026-03-30T10:17:36"
+                "lat": -26.2837722,
+                "lon": -48.8103,
+                "timestamp_foto": "2026-03-31T10:56:11"
+            },
+            "endereco": {
+                "display": "Rua Albano Schmidt, 3960 | Comasa - Joinville | Santa Catarina | 89228-310 | Brasil",
+                "rua": "Rua Albano Schmidt",
+                "numero": "3960",
+                "bairro": "Comasa",
+                "cidade": "Joinville",
+                "uf": "Santa Catarina",
+                "cep": "89228-310",
+                "pais": "Brasil",
+                "provider": "nominatim"
             },
             "precos": {
                 "gasolina_aditivada": 6.99,
@@ -35,11 +57,22 @@
         },
         {
             "id": "posto3",
-            "arquivo": "IMG_20260330_102216.jpg",
+            "arquivo": "IMG_20260331_110011.jpg",
             "coordenadas": {
-                "lat": -26.2999889,
-                "lon": -48.8230111,
-                "timestamp_foto": "2026-03-30T10:22:17"
+                "lat": -26.3000167,
+                "lon": -48.8229944,
+                "timestamp_foto": "2026-03-31T11:00:11"
+            },
+            "endereco": {
+                "display": "Rua Horto Florestal, 1502 | Boa Vista - Joinville | Santa Catarina | 89205-980 | Brasil",
+                "rua": "Rua Horto Florestal",
+                "numero": "1502",
+                "bairro": "Boa Vista",
+                "cidade": "Joinville",
+                "uf": "Santa Catarina",
+                "cep": "89205-980",
+                "pais": "Brasil",
+                "provider": "nominatim"
             },
             "precos": {
                 "gasolina_aditivada": 6.99,
@@ -51,75 +84,22 @@
         },
         {
             "id": "posto4",
-            "arquivo": "IMG_20260330_102417.jpg",
-            "coordenadas": {
-                "lat": -26.3060444,
-                "lon": -48.8292444,
-                "timestamp_foto": "2026-03-30T10:24:17"
-            },
-            "precos": {
-                "gasolina_aditivada": 6.55,
-                "gasolina_comum": 6.55,
-                "etanol": 4.55,
-                "diesel_s10": 6.99,
-                "diesel_s500": 6.97
-            }
-        },
-        {
-            "id": "posto5",
-            "arquivo": "IMG_20260331_105445.jpg",
-            "coordenadas": {
-                "lat": -26.2835028,
-                "lon": -48.8029083,
-                "timestamp_foto": "2026-03-31T10:54:45"
-            },
-            "precos": {
-                "gasolina_aditivada": 6.99,
-                "gasolina_comum": 6.79,
-                "etanol": 4.97,
-                "diesel_s10": 7.3,
-                "diesel_s500": null
-            }
-        },
-        {
-            "id": "posto6",
-            "arquivo": "IMG_20260331_105611.jpg",
-            "coordenadas": {
-                "lat": -26.2837722,
-                "lon": -48.8103,
-                "timestamp_foto": "2026-03-31T10:56:11"
-            },
-            "precos": {
-                "gasolina_aditivada": 6.99,
-                "gasolina_comum": 6.79,
-                "etanol": 4.97,
-                "diesel_s10": 7.79,
-                "diesel_s500": 7.44
-            }
-        },
-        {
-            "id": "posto7",
-            "arquivo": "IMG_20260331_110011.jpg",
-            "coordenadas": {
-                "lat": -26.3000167,
-                "lon": -48.8229944,
-                "timestamp_foto": "2026-03-31T11:00:11"
-            },
-            "precos": {
-                "gasolina_aditivada": 6.99,
-                "gasolina_comum": 6.79,
-                "etanol": 4.99,
-                "diesel_s10": 7.49,
-                "diesel_s500": null
-            }
-        },
-        {
-            "id": "posto8",
             "arquivo": "IMG_20260331_110232.jpg",
             "coordenadas": {
                 "lat": -26.3059917,
                 "lon": -48.8292222,
                 "timestamp_foto": "2026-03-31T11:02:32"
+            },
+            "endereco": {
+                "display": "Rua Conselheiro Lafayete, 25 | Boa Vista - Joinville | Santa Catarina | 89205-350 | Brasil",
+                "rua": "Rua Conselheiro Lafayete",
+                "numero": "25",
+                "bairro": "Boa Vista",
+                "cidade": "Joinville",
+                "uf": "Santa Catarina",
+                "cep": "89205-350",
+                "pais": "Brasil",
+                "provider": "nominatim"
             },
             "precos": {
                 "gasolina_aditivada": 6.55,

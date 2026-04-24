@@ -77,6 +77,94 @@ def _arquivo_do_dia(data_str=None):
         data_str = datetime.date.today().isoformat()
     return os.path.join(_processamento_dir(), f"{data_str}.json")
 
+_CACHE_ARQUIVO_TS_FOTO: dict[str, object] = {}
+
+def _parse_timestamp_foto(valor) -> datetime.datetime | None:
+    if not valor or not isinstance(valor, str):
+        return None
+    s = valor.strip()
+    if not s:
+        return None
+    s = s.replace(" ", "T")
+    try:
+        dt = datetime.datetime.fromisoformat(s)
+    except Exception:
+        try:
+            dt = datetime.datetime.strptime(valor.strip(), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return dt
+
+def _max_timestamp_foto_do_json(dados: object) -> datetime.datetime | None:
+    if not isinstance(dados, dict):
+        return None
+    postos = dados.get("postos")
+    if not isinstance(postos, list):
+        return None
+    melhor: datetime.datetime | None = None
+    for p in postos:
+        if not isinstance(p, dict):
+            continue
+        coords = p.get("coordenadas")
+        if not isinstance(coords, dict):
+            continue
+        dt = _parse_timestamp_foto(coords.get("timestamp_foto"))
+        if dt is None:
+            continue
+        if melhor is None or dt > melhor:
+            melhor = dt
+    return melhor
+
+def _arquivo_mais_recente_por_timestamp_foto():
+    pasta = _processamento_dir()
+    if not os.path.exists(pasta):
+        return None
+
+    nomes = []
+    for nome in os.listdir(pasta):
+        if re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?:_(\d{6}))?\.json", nome):
+            nomes.append(nome)
+    if not nomes:
+        return None
+
+    assinatura = tuple(sorted((n, os.path.getmtime(os.path.join(pasta, n))) for n in nomes))
+    cache = _CACHE_ARQUIVO_TS_FOTO
+    if cache.get("assinatura") == assinatura:
+        return cache.get("caminho")
+
+    candidatos: list[tuple[datetime.datetime, int, str, str, str]] = []
+    for nome in nomes:
+        m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})(?:_(\d{6}))?\.json", nome)
+        if not m:
+            continue
+        dia = m.group(1)
+        hora = m.group(2) or "000000"
+        caminho = os.path.join(pasta, nome)
+        try:
+            with open(caminho, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+        except Exception:
+            continue
+        ts = _max_timestamp_foto_do_json(dados)
+        if ts is None:
+            ts = datetime.datetime.min
+        try:
+            match_dia = 1 if ts.date().isoformat() == dia else 0
+        except Exception:
+            match_dia = 0
+        candidatos.append((ts, match_dia, dia, hora, caminho))
+
+    if not candidatos:
+        return None
+
+    candidatos.sort()
+    escolhido = candidatos[-1][4]
+    cache["assinatura"] = assinatura
+    cache["caminho"] = escolhido
+    return escolhido
+
 
 def _carregar_json(data_str=None):
     if data_str:
@@ -86,8 +174,7 @@ def _carregar_json(data_str=None):
             if not caminho or not os.path.exists(caminho):
                 raise HTTPException(status_code=404, detail="Arquivo do dia não encontrado")
     else:
-        hoje = datetime.date.today().isoformat()
-        caminho = _arquivo_mais_recente(hoje) or _arquivo_mais_recente()
+        caminho = _arquivo_mais_recente_por_timestamp_foto() or _arquivo_mais_recente()
         if not caminho or not os.path.exists(caminho):
             raise HTTPException(status_code=404, detail="Nenhum arquivo JSON encontrado")
     with open(caminho, "r", encoding="utf-8") as f:
@@ -95,6 +182,38 @@ def _carregar_json(data_str=None):
             return json.load(f)
         except Exception:
             raise HTTPException(status_code=500, detail="Falha ao ler JSON do dia")
+
+def _preco_para_combustivel(item: object, combustivel: str) -> float | None:
+    if not isinstance(item, dict):
+        return None
+    precos = item.get("precos")
+    if not isinstance(precos, dict):
+        return None
+
+    def _num(v) -> float | None:
+        if isinstance(v, (int, float)) and bool(v) and float(v) == float(v):
+            return float(v)
+        if isinstance(v, (int, float)) and float(v) == float(v):
+            return float(v)
+        return None
+
+    c = (combustivel or "").strip().lower()
+    if c == "gasolina":
+        return _num(precos.get("gasolina_comum")) or _num(precos.get("gasolina_aditivada"))
+    if c == "etanol":
+        return _num(precos.get("etanol"))
+    if c == "diesel":
+        return _num(precos.get("diesel_s10")) or _num(precos.get("diesel_s500"))
+    return None
+
+def _data_referencia(dados: object) -> str | None:
+    ts = _max_timestamp_foto_do_json(dados)
+    if ts is not None:
+        try:
+            return ts.date().isoformat()
+        except Exception:
+            return None
+    return None
 
 
 @app.get("/api/hoje", tags=["Dados"], summary="Retorna o JSON do dia (ou o mais recente disponível)")
@@ -114,10 +233,68 @@ def dia(data_str: str, x_api_key: str | None = Security(api_key_header)):
 
 
 @app.get("/api/postos", tags=["Postos"], summary="Lista postos do JSON do dia (ou mais recente disponível)")
-def postos(x_api_key: str | None = Security(api_key_header)):
+def postos(combustivel: str | None = None, x_api_key: str | None = Security(api_key_header)):
     _checar_api_key(x_api_key)
     dados = _carregar_json()
-    return dados.get("postos", [])
+    itens = dados.get("postos", [])
+    if not isinstance(itens, list):
+        return []
+
+    if combustivel is None:
+        return itens
+
+    c = combustivel.strip().lower()
+    if c not in ("gasolina", "etanol", "diesel"):
+        raise HTTPException(status_code=400, detail="Combustível inválido. Use: gasolina, etanol, diesel.")
+
+    def chave(p: object):
+        preco = _preco_para_combustivel(p, c)
+        if preco is None:
+            return (1, 0.0, (p.get("id") if isinstance(p, dict) else "") or "")
+        return (0, preco, (p.get("id") if isinstance(p, dict) else "") or "")
+
+    itens_ordenados = list(itens)
+    itens_ordenados.sort(key=chave)
+    return itens_ordenados
+
+
+@app.get(
+    "/api/postos_resumo",
+    tags=["Postos"],
+    summary="Lista postos e metadados (data do registro) do JSON do dia (ou mais recente disponível)",
+)
+def postos_resumo(combustivel: str | None = None, x_api_key: str | None = Security(api_key_header)):
+    _checar_api_key(x_api_key)
+    dados = _carregar_json()
+    itens = dados.get("postos", [])
+    if not isinstance(itens, list):
+        itens = []
+
+    if combustivel is None:
+        c = None
+        itens_ordenados = list(itens)
+    else:
+        c = combustivel.strip().lower()
+        if c not in ("gasolina", "etanol", "diesel"):
+            raise HTTPException(
+                status_code=400, detail="Combustível inválido. Use: gasolina, etanol, diesel."
+            )
+
+        def chave(p: object):
+            preco = _preco_para_combustivel(p, c)
+            if preco is None:
+                return (1, 0.0, (p.get("id") if isinstance(p, dict) else "") or "")
+            return (0, preco, (p.get("id") if isinstance(p, dict) else "") or "")
+
+        itens_ordenados = list(itens)
+        itens_ordenados.sort(key=chave)
+
+    return {
+        "data": _data_referencia(dados),
+        "total": len(itens_ordenados),
+        "combustivel": c,
+        "postos": itens_ordenados,
+    }
 
 
 @app.get("/api/postos/{posto_id}", tags=["Postos"], summary="Retorna um posto pelo id (ex.: posto1)")

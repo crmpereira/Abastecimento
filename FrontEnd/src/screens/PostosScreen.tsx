@@ -8,9 +8,14 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { Appbar, Button, Card, Chip, Text, useTheme } from "react-native-paper";
+import { Appbar, Button, Card, Chip, Menu, Text, useTheme } from "react-native-paper";
 import * as Location from "expo-location";
-import { fetchPostos, getApiBaseUrl, PostoApi } from "../api/backend";
+import {
+  CombustivelFiltro,
+  fetchPostosResumoPorCombustivel,
+  getApiBaseUrl,
+  PostoApi,
+} from "../api/backend";
 import { haversineKm } from "../lib/distance";
 
 type Coords = { lat: number; lon: number };
@@ -32,11 +37,28 @@ function formatData(ts: string | null): string {
   return d.toLocaleDateString("pt-BR");
 }
 
+function formatDia(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(`${iso}T00:00:00`);
+  if (!Number.isFinite(d.getTime())) return iso;
+  return d.toLocaleDateString("pt-BR");
+}
+
 function formatHora(ts: string | null): string {
   if (!ts) return "sem hora";
   const d = new Date(ts);
   if (!Number.isFinite(d.getTime())) return "—";
   return d.toLocaleTimeString("pt-BR");
+}
+
+function formatEnderecoDisplay(display: string | null | undefined): string {
+  if (!display) return "Endereço não disponível";
+  return display;
+}
+
+function formatEnderecoCompacto(display: string | null | undefined): string {
+  if (!display) return "Endereço não disponível";
+  return display.replace("Santa Catarina", "SC").replace(" | Brasil", "");
 }
 
 function formatNomePosto(id: string): string {
@@ -56,6 +78,20 @@ function formatPrecoNumero(valor: number | null | undefined): string {
   return valor.toFixed(2).replace(".", ",");
 }
 
+function labelCombustivel(c: CombustivelFiltro): string {
+  if (c === "etanol") return "Etanol";
+  if (c === "diesel") return "Diesel";
+  return "Gasolina";
+}
+
+function precoFiltro(p: PostoApi, c: CombustivelFiltro): number | null {
+  const precos = p.precos;
+  if (!precos) return null;
+  if (c === "etanol") return precos.etanol ?? null;
+  if (c === "diesel") return (precos.diesel_s10 ?? null) ?? (precos.diesel_s500 ?? null);
+  return (precos.gasolina_comum ?? null) ?? (precos.gasolina_aditivada ?? null);
+}
+
 export function PostosScreen({ onLogout }: PostosScreenProps) {
   const { width } = useWindowDimensions();
   const theme = useTheme();
@@ -64,6 +100,10 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
   const [erro, setErro] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [coords, setCoords] = useState<Coords | null>(null);
+  const [combustivel, setCombustivel] = useState<CombustivelFiltro>("gasolina");
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [dataRef, setDataRef] = useState<string | null>(null);
+  const [enderecoMenuId, setEnderecoMenuId] = useState<string | null>(null);
 
   const cols = width >= 1200 ? 3 : width >= 860 ? 2 : 1;
   const pagePadding = width >= 720 ? 20 : 12;
@@ -71,27 +111,44 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
 
   useMemo(() => getApiBaseUrl(), []);
 
-  const carregar = useCallback(async () => {
+  const carregar = useCallback(async (c: CombustivelFiltro) => {
     setErro(null);
-    const data = await fetchPostos();
-    setPostos(data);
+    const resp = await fetchPostosResumoPorCombustivel(c);
+    setPostos(resp.postos);
+    setDataRef(resp.data ?? null);
   }, []);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await carregar();
+      await carregar(combustivel);
     } catch (e: any) {
       setErro(e?.message || "Falha ao carregar postos");
     } finally {
       setRefreshing(false);
     }
-  }, [carregar]);
+  }, [carregar, combustivel]);
+
+  const selecionarCombustivel = useCallback(
+    async (c: CombustivelFiltro) => {
+      setMenuVisible(false);
+      setCombustivel(c);
+      setRefreshing(true);
+      try {
+        await carregar(c);
+      } catch (e: any) {
+        setErro(e?.message || "Falha ao carregar postos");
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [carregar]
+  );
 
   useEffect(() => {
     (async () => {
       try {
-        await carregar();
+        await carregar("gasolina");
       } catch (e: any) {
         setErro(e?.message || "Falha ao carregar postos");
       } finally {
@@ -134,8 +191,8 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
   const postosOrdenados = useMemo(() => {
     const copy = [...postosComDistancia];
     copy.sort((a, b) => {
-      const ga = a.precos?.gasolina_comum ?? null;
-      const gb = b.precos?.gasolina_comum ?? null;
+      const ga = precoFiltro(a, combustivel);
+      const gb = precoFiltro(b, combustivel);
       const gaOk = typeof ga === "number" && Number.isFinite(ga);
       const gbOk = typeof gb === "number" && Number.isFinite(gb);
       if (gaOk && gbOk && ga !== gb) return ga - gb;
@@ -150,7 +207,17 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
       return da - db;
     });
     return copy;
-  }, [postosComDistancia]);
+  }, [postosComDistancia, combustivel]);
+
+  const menorPreco = useMemo(() => {
+    let melhor: number | null = null;
+    for (const p of postosOrdenados) {
+      const v = precoFiltro(p, combustivel);
+      if (typeof v !== "number" || !Number.isFinite(v)) continue;
+      if (melhor === null || v < melhor) melhor = v;
+    }
+    return melhor;
+  }, [postosOrdenados, combustivel]);
 
   function abrirNoMapa(p: PostoApi) {
     const lat = p.coordenadas?.lat ?? null;
@@ -203,19 +270,47 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
             ListHeaderComponent={
               <View style={styles.listHeader}>
                 <View style={styles.pills}>
-                  <Chip
-                    style={[styles.pill, { backgroundColor: theme.colors.surfaceVariant }]}
-                    textStyle={styles.pillText}
-                    compact
+                  <Menu
+                    visible={menuVisible}
+                    onDismiss={() => setMenuVisible(false)}
+                    anchor={
+                      <Chip
+                        style={[styles.pill, { backgroundColor: theme.colors.surfaceVariant }]}
+                        textStyle={styles.pillText}
+                        compact
+                        onPress={() => setMenuVisible(true)}
+                      >
+                        Menor {labelCombustivel(combustivel)}
+                        {menorPreco !== null ? `: ${formatPreco(menorPreco)}` : ""}
+                      </Chip>
+                    }
                   >
-                    Menor gasolina
-                  </Chip>
+                    <Menu.Item
+                      title="Gasolina"
+                      onPress={() => selecionarCombustivel("gasolina")}
+                    />
+                    <Menu.Item
+                      title="Etanol"
+                      onPress={() => selecionarCombustivel("etanol")}
+                    />
+                    <Menu.Item
+                      title="Diesel"
+                      onPress={() => selecionarCombustivel("diesel")}
+                    />
+                  </Menu>
                   <Chip
                     style={[styles.pill, { backgroundColor: theme.colors.surfaceVariant }]}
                     textStyle={styles.pillText}
                     compact
                   >
                     {postosOrdenados.length} postos
+                  </Chip>
+                  <Chip
+                    style={[styles.pill, { backgroundColor: theme.colors.surfaceVariant }]}
+                    textStyle={styles.pillText}
+                    compact
+                  >
+                    Data: {formatDia(dataRef)}
                   </Chip>
                 </View>
               </View>
@@ -235,6 +330,9 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
               const lon = item.coordenadas?.lon ?? null;
               const ts = item.coordenadas?.timestamp_foto ?? null;
               const p = item.precos;
+              const endereco = item.endereco?.display ?? null;
+              const title =
+                dist !== null ? `${formatNomePosto(item.id)} ( ${formatKm(dist)} )` : formatNomePosto(item.id);
               return (
                 <View style={styles.cardWrap}>
                   <Card
@@ -244,29 +342,13 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
                     ]}
                   >
                     <Card.Title
-                      title={formatNomePosto(item.id)}
+                      title={title}
                       titleStyle={styles.cardTitle}
                       style={styles.cardTitleContainer}
-                      right={
-                        dist !== null
-                          ? () => (
-                              <Chip
-                                style={[styles.chip, { backgroundColor: theme.colors.surfaceVariant }]}
-                                textStyle={styles.chipText}
-                                compact
-                              >
-                                {formatKm(dist)}
-                              </Chip>
-                            )
-                          : undefined
-                      }
                     />
                     <Card.Content style={styles.cardContent}>
                       <Text variant="bodySmall" style={styles.row}>
-                        Data: {formatData(ts)}
-                      </Text>
-                      <Text variant="bodySmall" style={styles.row}>
-                        Hora: {formatHora(ts)}
+                        {formatEnderecoCompacto(endereco)}
                       </Text>
 
                       <View style={styles.board}>
@@ -340,26 +422,27 @@ const styles = StyleSheet.create({
   pill: { borderRadius: 999 },
   pillText: { fontSize: 12, opacity: 0.85 },
   empty: { paddingTop: 24, paddingBottom: 24, alignItems: "center" },
-  columnWrapper: { gap: 12 },
-  cardWrap: { flex: 1, minWidth: 240, paddingTop: 8 },
+  columnWrapper: { gap: 10 },
+  cardWrap: { flex: 1, minWidth: 220, paddingTop: 6 },
   card: {
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: "hidden",
     borderWidth: 1,
     shadowColor: "#000",
     shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
     elevation: 1,
   },
-  cardTitleContainer: { paddingTop: 8, paddingBottom: 6, paddingHorizontal: 4 },
-  cardTitle: { fontWeight: "700", fontSize: 15, lineHeight: 18 },
-  chip: { marginRight: 10, borderRadius: 999 },
-  chipText: { fontSize: 11, opacity: 0.85 },
-  cardContent: { paddingTop: 4, paddingBottom: 8 },
-  row: { opacity: 0.8, marginBottom: 3, fontSize: 11, lineHeight: 14 },
+  cardTitleContainer: { paddingTop: 6, paddingBottom: 4, paddingHorizontal: 4 },
+  cardTitle: { fontWeight: "700", fontSize: 14, lineHeight: 17 },
+  cardContent: { paddingTop: 0, paddingBottom: 8 },
+  row: { opacity: 0.8, marginBottom: 6, fontSize: 11, lineHeight: 14 },
+  metaRow: { alignItems: "flex-end", marginBottom: 6 },
+  metaChip: { borderRadius: 999 },
+  metaChipText: { fontSize: 11, opacity: 0.85 },
   board: {
-    marginTop: 6,
+    marginTop: 4,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: "rgba(2, 6, 23, 0.14)",
