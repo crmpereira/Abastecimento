@@ -3,12 +3,17 @@ import { View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, MD3LightTheme, PaperProvider, Text } from "react-native-paper";
 import { LoginScreen } from "./src/screens/LoginScreen";
+import { ProcessamentoScreen } from "./src/screens/ProcessamentoScreen";
 import { PostosScreen } from "./src/screens/PostosScreen";
 import { AuthUser, clearUser, loadUser, saveUser } from "./src/lib/auth";
 
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [tela, setTela] = useState<"postos" | "processamento">("postos");
+
+  const podeVerProcessamento =
+    typeof user?.email === "string" && user.email.trim().toLowerCase() === "cesar.pereiram@gmail.com";
 
   const theme = useMemo(() => {
     return {
@@ -50,6 +55,7 @@ export default function App() {
   async function onLogout() {
     await clearUser();
     setUser(null);
+    setTela("postos");
   }
 
   return (
@@ -69,7 +75,18 @@ export default function App() {
           <Text style={{ marginTop: 12 }}>Carregando...</Text>
         </View>
       ) : user ? (
-        <PostosScreen onLogout={onLogout} />
+        tela === "processamento" ? (
+          podeVerProcessamento ? (
+            <ProcessamentoScreen onBack={() => setTela("postos")} onLogout={onLogout} />
+          ) : (
+            <PostosScreen onLogout={onLogout} />
+          )
+        ) : (
+          <PostosScreen
+            onLogout={onLogout}
+            onOpenProcessamento={podeVerProcessamento ? () => setTela("processamento") : undefined}
+          />
+        )
       ) : (
         <LoginScreen onLogin={onLogin} />
       )}

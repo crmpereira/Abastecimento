@@ -24,6 +24,7 @@ type Coords = { lat: number; lon: number };
 
 export type PostosScreenProps = {
   readonly onLogout: () => Promise<void>;
+  readonly onOpenProcessamento?: () => void;
 };
 
 function formatKm(km: number): string {
@@ -111,7 +112,7 @@ function precoFiltro(p: PostoApi, c: CombustivelFiltro): number | null {
   return (precos.gasolina_comum ?? null) ?? (precos.gasolina_aditivada ?? null);
 }
 
-export function PostosScreen({ onLogout }: PostosScreenProps) {
+export function PostosScreen({ onLogout, onOpenProcessamento }: PostosScreenProps) {
   const { width } = useWindowDimensions();
   const theme = useTheme();
   const [postos, setPostos] = useState<PostoApi[]>([]);
@@ -327,6 +328,7 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
           title={localAtual ? `Abastece Aqui • ${localAtual}` : "Abastece Aqui"}
           titleStyle={styles.appbarTitle}
         />
+        {onOpenProcessamento ? <Appbar.Action icon="cog" onPress={onOpenProcessamento} /> : null}
         <Appbar.Action icon="refresh" onPress={refresh} />
         <Appbar.Action icon="logout" onPress={sair} />
       </Appbar.Header>

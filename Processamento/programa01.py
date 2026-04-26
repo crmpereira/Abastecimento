@@ -38,6 +38,13 @@ def _env_int(nome: str, padrao: int) -> int:
 def _env_str(nome: str) -> str:
     return os.getenv(nome, "").strip()
 
+def _env_lista_str(nome: str) -> list[str]:
+    v = os.getenv(nome, "").strip()
+    if not v:
+        return []
+    partes = re.split(r"[,\n;\r\t]+", v)
+    return [p.strip() for p in partes if p and p.strip()]
+
 
 def configurar_log(base_dir: str) -> logging.Logger:
     """
@@ -628,6 +635,7 @@ def main():
     agora = datetime.datetime.now().astimezone()
     processado_em = agora.isoformat(timespec="seconds")
     sem_ia = _env_bool("PROCESSAMENTO_SEM_IA")
+    arquivos_forcados = _env_lista_str("PROCESSAR_ARQUIVOS")
     espera_entre_fotos = _env_int("ESPERA_ENTRE_FOTOS", ESPERA_ENTRE_FOTOS)
     espera_rate_limit = _env_int("ESPERA_RATE_LIMIT", ESPERA_RATE_LIMIT)
     espera_geocode = _env_int("ESPERA_GEOCODE", ESPERA_GEOCODE)
@@ -659,6 +667,9 @@ def main():
         return
 
     fotos = sorted(f for f in os.listdir(pasta_fotos) if f.lower().endswith((".png", ".jpg", ".jpeg")))
+    if arquivos_forcados:
+        set_forcados = {a.strip() for a in arquivos_forcados if a and a.strip()}
+        fotos = [f for f in fotos if f in set_forcados]
     total = len(fotos)
     logger.info(f"Total de fotos encontradas: {total}")
 
@@ -666,20 +677,30 @@ def main():
         logger.warning("Nenhuma foto encontrada. Encerrando.")
         return
 
-    fotos_com_dia: list[tuple[str, str]] = []
-    for nome_arq in fotos:
-        caminho = os.path.join(pasta_fotos, nome_arq)
-        dia_foto = _extrair_dia_da_foto(caminho, nome_arq)
-        if dia_foto:
-            fotos_com_dia.append((dia_foto, nome_arq))
+    if not arquivos_forcados:
+        fotos_com_dia: list[tuple[str, str]] = []
+        for nome_arq in fotos:
+            caminho = os.path.join(pasta_fotos, nome_arq)
+            dia_foto = _extrair_dia_da_foto(caminho, nome_arq)
+            if dia_foto:
+                fotos_com_dia.append((dia_foto, nome_arq))
 
-    if fotos_com_dia:
-        dia_alvo = max(d for d, _ in fotos_com_dia)
-        fotos = [nome for d, nome in fotos_com_dia if d == dia_alvo]
-        logger.info(f"Dia alvo (mais recente): {dia_alvo} | Fotos selecionadas: {len(fotos)}")
+        if fotos_com_dia:
+            dia_alvo = max(d for d, _ in fotos_com_dia)
+            fotos = [nome for d, nome in fotos_com_dia if d == dia_alvo]
+            logger.info(f"Dia alvo (mais recente): {dia_alvo} | Fotos selecionadas: {len(fotos)}")
+        else:
+            dia_alvo = agora.strftime("%Y-%m-%d")
+            logger.warning("Não foi possível identificar o dia das fotos. Processando todas as imagens encontradas.")
     else:
-        dia_alvo = agora.strftime("%Y-%m-%d")
-        logger.warning("Não foi possível identificar o dia das fotos. Processando todas as imagens encontradas.")
+        dias: list[str] = []
+        for nome_arq in fotos:
+            caminho = os.path.join(pasta_fotos, nome_arq)
+            dia_foto = _extrair_dia_da_foto(caminho, nome_arq)
+            if dia_foto:
+                dias.append(dia_foto)
+        dia_alvo = max(dias) if dias else agora.strftime("%Y-%m-%d")
+        logger.info(f"Arquivos forçados: {len(fotos)} | Dia alvo: {dia_alvo}")
 
     dia = dia_alvo
     arquivo_saida_final = os.path.join(base_dir, f"{dia}.json")

@@ -3,6 +3,7 @@
 Projeto com 3 partes:
 
 - Processamento: lê fotos de bombas/placas de preços, extrai coordenadas/data via EXIF e consulta IA (Gemini) para obter os preços; gera um JSON diário.
+- Processamento (ANP): baixa a planilha semanal da ANP, filtra por UF/município e gera um JSON para consumo no app.
 - BackEnd: API (FastAPI) que serve os dados do JSON diário.
 - FrontEnd: app (Expo/React Native) que consome a API e lista os postos.
 
@@ -10,9 +11,11 @@ Projeto com 3 partes:
 
 - Processamento/
   - programa01.py
+  - programa02.py
   - Fotos/ (coloque aqui as imagens .jpg/.jpeg/.png)
   - gemini_api_key.txt (chave do Gemini)
   - YYYY-MM-DD.json (saída gerada pelo processamento)
+  - anp_municipios_<UF>_<MUNICIPIO>_<YYYY-MM-DD>_<YYYY-MM-DD>.json (saída gerada do ANP)
 - BackEnd/
   - main.py
   - requirements.txt
@@ -71,6 +74,27 @@ GEMINI_MODEL=gemini-1.5-flash
 
 # Desativa a IA (somente EXIF, preços = null) — útil para testes
 PROCESSAMENTO_SEM_IA=1
+
+# Processa SOMENTE os arquivos listados (separados por ; , ou quebra de linha)
+# Ex.: PROCESSAR_ARQUIVOS="IMG_001.jpg;IMG_002.jpg"
+PROCESSAR_ARQUIVOS=
+```
+
+## Processamento ANP (MUNICÍPIOS)
+
+Executar:
+
+```bash
+py Processamento/programa02.py
+```
+
+Observações:
+
+- O script tenta descobrir automaticamente o XLSX mais recente da ANP.
+- Se precisar forçar uma URL específica do XLSX, use:
+
+```bash
+ANP_XLSX_URL=https://www.gov.br/anp/.../resumo_semanal_lpc_YYYY-MM-DD-YYYY-MM-DD.xlsx
 ```
 
 ## BackEnd (FastAPI + Swagger)
@@ -105,6 +129,14 @@ Endpoints principais:
 - GET /api/hoje
 - GET /api/dias
 - GET /api/dia/{data_str}
+- GET /api/anp/municipios
+
+Endpoints de processamento (executam os scripts Python no servidor):
+
+- POST /api/processamento/fotos/upload
+- POST /api/processamento/fotos/processar
+- POST /api/processamento/anp/processar
+- GET /api/processamento/jobs/{job_id}
 
 ## FrontEnd (Expo)
 
@@ -118,7 +150,7 @@ npm install
 2) Rodar no Web:
 
 ```bash
-npm run web -- --port 19007
+npm run web
 ```
 
 3) Rodar no celular:
@@ -130,3 +162,13 @@ Configurações opcionais (FrontEnd):
 
 - EXPO_PUBLIC_API_BASE_URL: base da API (ex.: http://127.0.0.1:8000)
 - EXPO_PUBLIC_API_KEY: enviada como x-api-key para a API
+
+### Tela de Processamentos (Fotos + ANP)
+
+- Existe uma tela “Processamentos” (acessível pelo ícone de engrenagem na tela de postos).
+- Restrição: o ícone de engrenagem só aparece para o usuário `cesar.pereiram@gmail.com`.
+- Fotos:
+  - No Web (Windows), permite selecionar uma pasta, marcar arquivos (ou marcar todos) e enviar somente os selecionados.
+  - Ao executar, o BackEnd faz upload para `Processamento/Fotos/` e roda `programa01.py` apenas para os arquivos selecionados.
+- ANP:
+  - Botão “Processar ANP” que roda `programa02.py` no BackEnd.

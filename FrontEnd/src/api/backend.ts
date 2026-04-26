@@ -61,6 +61,17 @@ export type AnpMunicipiosApi = {
   }>;
 };
 
+export type ProcessamentoJobApi = {
+  id?: string;
+  tipo?: string;
+  status?: string;
+  criado_em?: string | null;
+  finalizado_em?: string | null;
+  exit_code?: number | null;
+  comando?: string[] | null;
+  saida?: string | null;
+};
+
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 
 function normalizeBaseUrl(url: string): string {
@@ -103,6 +114,13 @@ function getApiKey(): string | null {
 }
 
 function buildHeaders(): HeadersInit {
+  const apiKey = getApiKey();
+  const headers: Record<string, string> = {};
+  if (apiKey) headers["x-api-key"] = apiKey;
+  return headers;
+}
+
+function buildHeadersForMultipart(): HeadersInit {
   const apiKey = getApiKey();
   const headers: Record<string, string> = {};
   if (apiKey) headers["x-api-key"] = apiKey;
@@ -170,4 +188,72 @@ export async function fetchAnpMunicipios(params?: {
     return {};
   }
   return data as AnpMunicipiosApi;
+}
+
+export async function uploadFotos(
+  arquivos: Array<{ nome: string; file: any }>
+): Promise<{ arquivos: string[] }> {
+  const baseUrl = getApiBaseUrl();
+  const form = new FormData();
+  for (const a of arquivos) {
+    if (!a?.file) continue;
+    const nome = typeof a.nome === "string" && a.nome.trim() ? a.nome.trim() : "foto.jpg";
+    (form as any).append("files", a.file, nome);
+  }
+
+  const res = await fetch(`${baseUrl}/api/processamento/fotos/upload`, {
+    method: "POST",
+    headers: buildHeadersForMultipart(),
+    body: form as any,
+  });
+  if (!res.ok) {
+    throw new Error(`Falha ao subir fotos: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!data || typeof data !== "object") return { arquivos: [] };
+  return data as { arquivos: string[] };
+}
+
+export async function iniciarProcessamentoFotos(arquivos: string[]): Promise<{ job_id: string }> {
+  const baseUrl = getApiBaseUrl();
+  const res = await fetch(`${baseUrl}/api/processamento/fotos/processar`, {
+    method: "POST",
+    headers: { ...buildHeaders(), "content-type": "application/json" },
+    body: JSON.stringify({ arquivos }),
+  });
+  if (!res.ok) {
+    throw new Error(`Falha ao iniciar processamento de fotos: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!data || typeof data !== "object") {
+    throw new Error("Resposta inválida ao iniciar processamento de fotos");
+  }
+  return data as { job_id: string };
+}
+
+export async function iniciarProcessamentoAnp(): Promise<{ job_id: string }> {
+  const baseUrl = getApiBaseUrl();
+  const res = await fetch(`${baseUrl}/api/processamento/anp/processar`, {
+    method: "POST",
+    headers: buildHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Falha ao iniciar processamento ANP: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!data || typeof data !== "object") {
+    throw new Error("Resposta inválida ao iniciar processamento ANP");
+  }
+  return data as { job_id: string };
+}
+
+export async function fetchProcessamentoJob(jobId: string): Promise<ProcessamentoJobApi> {
+  const baseUrl = getApiBaseUrl();
+  const res = await fetch(`${baseUrl}/api/processamento/jobs/${encodeURIComponent(jobId)}`, { headers: buildHeaders() });
+  if (!res.ok) {
+    throw new Error(`Falha ao consultar job: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!data || typeof data !== "object") return {};
+  return data as ProcessamentoJobApi;
 }

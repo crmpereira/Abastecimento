@@ -1,10 +1,15 @@
-from fastapi import FastAPI, HTTPException, Security
+from fastapi import Body, FastAPI, File, HTTPException, Security, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
 import os
 import json
 import datetime
 import re
+import subprocess
+import sys
+import threading
+import time
+import uuid
 
 app = FastAPI(
     title="AbasteceAqui API",
@@ -27,6 +32,9 @@ def _processamento_dir():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     raiz = os.path.dirname(base_dir)
     return os.path.join(raiz, "Processamento")
+
+def _fotos_dir():
+    return os.path.join(_processamento_dir(), "Fotos")
 
 def _api_key_configurada():
     return (os.getenv("ABASTECEAQUI_API_KEY") or "").strip()
@@ -367,3 +375,198 @@ def anp_municipios(
             return json.load(f)
     except Exception:
         raise HTTPException(status_code=500, detail="Falha ao ler JSON ANP")
+
+
+_JOBS: dict[str, dict[str, object]] = {}
+_JOBS_LOCK = threading.Lock()
+
+
+def _job_get(job_id: str) -> dict[str, object] | None:
+    with _JOBS_LOCK:
+        return _JOBS.get(job_id)
+
+
+def _job_create(tipo: str, comando: list[str]) -> dict[str, object]:
+    agora = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "tipo": tipo,
+        "status": "running",
+        "criado_em": agora,
+        "finalizado_em": None,
+        "exit_code": None,
+        "comando": comando,
+        "saida": "",
+    }
+    with _JOBS_LOCK:
+        _JOBS[job_id] = job
+    return job
+
+
+def _job_append_output(job_id: str, texto: str) -> None:
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        atual = str(job.get("saida") or "")
+        novo = (atual + texto)[-20000:]
+        job["saida"] = novo
+
+
+def _job_finish(job_id: str, exit_code: int | None) -> None:
+    fim = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        job["finalizado_em"] = fim
+        job["exit_code"] = exit_code
+        job["status"] = "done" if exit_code == 0 else "error"
+
+
+def _iniciar_subprocesso_em_job(
+    tipo: str, comando: list[str], cwd: str | None = None, env: dict[str, str] | None = None
+) -> dict[str, object]:
+    job = _job_create(tipo=tipo, comando=comando)
+    job_id = str(job["id"])
+
+    def runner():
+        base_env = os.environ.copy()
+        if env:
+            base_env.update(env)
+        try:
+            p = subprocess.Popen(
+                comando,
+                cwd=cwd,
+                env=base_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except Exception as e:
+            _job_append_output(job_id, f"Falha ao iniciar processo: {e}\n")
+            _job_finish(job_id, 1)
+            return
+
+        try:
+            if p.stdout is not None:
+                for linha in p.stdout:
+                    _job_append_output(job_id, linha)
+        except Exception as e:
+            _job_append_output(job_id, f"\nFalha ao ler saída: {e}\n")
+        finally:
+            try:
+                p.wait()
+            except Exception:
+                pass
+
+        _job_finish(job_id, p.returncode)
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    return job
+
+
+def _sanitizar_nome_arquivo(nome: str) -> str:
+    base = os.path.basename(nome or "").strip()
+    base = base.replace("\\", "_").replace("/", "_")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base)
+    return base or "arquivo"
+
+
+@app.post("/api/processamento/fotos/upload", tags=["Processamento"], summary="Upload de fotos para Processamento/Fotos")
+async def upload_fotos(
+    files: list[UploadFile] = File(...),
+    x_api_key: str | None = Security(api_key_header),
+):
+    _checar_api_key(x_api_key)
+    pasta = _fotos_dir()
+    os.makedirs(pasta, exist_ok=True)
+
+    salvos: list[str] = []
+    for f in files:
+        nome = _sanitizar_nome_arquivo(f.filename or "")
+        ext = os.path.splitext(nome)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png"):
+            continue
+        destino = os.path.join(pasta, nome)
+        if os.path.exists(destino):
+            base, ext2 = os.path.splitext(nome)
+            sufixo = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            destino = os.path.join(pasta, f"{base}_{sufixo}{ext2}")
+            nome = os.path.basename(destino)
+        payload = await f.read()
+        with open(destino, "wb") as out:
+            out.write(payload)
+        salvos.append(nome)
+
+    return {"arquivos": salvos}
+
+
+@app.post(
+    "/api/processamento/fotos/processar",
+    tags=["Processamento"],
+    summary="Inicia o processamento das fotos (programa01.py) somente para os arquivos informados",
+)
+def processar_fotos(
+    body: dict = Body(default={}),
+    x_api_key: str | None = Security(api_key_header),
+):
+    _checar_api_key(x_api_key)
+    arquivos = body.get("arquivos")
+    if arquivos is None:
+        arquivos = []
+    if not isinstance(arquivos, list) or not all(isinstance(a, str) for a in arquivos):
+        raise HTTPException(status_code=400, detail="Campo 'arquivos' inválido")
+
+    proc_dir = _processamento_dir()
+    script = os.path.join(proc_dir, "programa01.py")
+    if not os.path.exists(script):
+        raise HTTPException(status_code=404, detail="programa01.py não encontrado")
+
+    env = {}
+    if arquivos:
+        env["PROCESSAR_ARQUIVOS"] = ";".join(a.strip() for a in arquivos if a.strip())
+
+    job = _iniciar_subprocesso_em_job(
+        tipo="processar_fotos",
+        comando=[sys.executable, script],
+        cwd=proc_dir,
+        env=env,
+    )
+    return {"job_id": job["id"]}
+
+
+@app.post(
+    "/api/processamento/anp/processar",
+    tags=["Processamento"],
+    summary="Inicia o processamento ANP (programa02.py)",
+)
+def processar_anp(
+    x_api_key: str | None = Security(api_key_header),
+):
+    _checar_api_key(x_api_key)
+    proc_dir = _processamento_dir()
+    script = os.path.join(proc_dir, "programa02.py")
+    if not os.path.exists(script):
+        raise HTTPException(status_code=404, detail="programa02.py não encontrado")
+
+    job = _iniciar_subprocesso_em_job(
+        tipo="processar_anp",
+        comando=[sys.executable, script],
+        cwd=proc_dir,
+        env=None,
+    )
+    return {"job_id": job["id"]}
+
+
+@app.get("/api/processamento/jobs/{job_id}", tags=["Processamento"], summary="Consulta status/saída de um job")
+def job_status(job_id: str, x_api_key: str | None = Security(api_key_header)):
+    _checar_api_key(x_api_key)
+    job = _job_get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    return job
