@@ -37,6 +37,30 @@ export type PostosResumoApi = {
   postos: PostoApi[];
 };
 
+export type AnpMunicipiosApi = {
+  schema_version?: number;
+  fonte_url?: string;
+  gerado_em?: string;
+  uf?: string;
+  estado?: string;
+  municipio?: string;
+  periodo?: { inicio?: string; fim?: string } | null;
+  planilha?: string;
+  total_produtos?: number;
+  produtos?: Array<{
+    produto?: string;
+    unidade?: string | null;
+    postos_pesquisados?: number | null;
+    preco_medio?: number | null;
+    preco_min?: number | null;
+    preco_max?: number | null;
+    desvio_padrao?: number | null;
+    coef_variacao?: number | null;
+    data_inicial?: string | null;
+    data_final?: string | null;
+  }>;
+};
+
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 
 function normalizeBaseUrl(url: string): string {
@@ -126,4 +150,24 @@ export async function fetchPostosResumoPorCombustivel(
     return { data: null, total: 0, combustivel: null, postos: [] };
   }
   return data as PostosResumoApi;
+}
+
+export async function fetchAnpMunicipios(params?: {
+  uf?: string;
+  municipio?: string;
+}): Promise<AnpMunicipiosApi> {
+  const baseUrl = getApiBaseUrl();
+  const qs = new URLSearchParams();
+  if (params?.uf) qs.set("uf", params.uf);
+  if (params?.municipio) qs.set("municipio", params.municipio);
+  const url = `${baseUrl}/api/anp/municipios${qs.toString() ? `?${qs.toString()}` : ""}`;
+  const res = await fetch(url, { headers: buildHeaders() });
+  if (!res.ok) {
+    throw new Error(`Falha ao buscar ANP: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!data || typeof data !== "object") {
+    return {};
+  }
+  return data as AnpMunicipiosApi;
 }

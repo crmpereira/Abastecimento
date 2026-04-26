@@ -183,6 +183,45 @@ def _carregar_json(data_str=None):
         except Exception:
             raise HTTPException(status_code=500, detail="Falha ao ler JSON do dia")
 
+
+def _arquivo_anp_mais_recente(uf: str | None = None, municipio: str | None = None):
+    pasta = _processamento_dir()
+    if not os.path.exists(pasta):
+        return None
+
+    uf_norm = (uf or "").strip().upper() or None
+    mun_norm = (municipio or "").strip().lower() or None
+
+    rx = re.compile(
+        r"^anp_municipios_(?P<uf>[A-Za-z]{2})_(?P<mun>[-_A-Za-z0-9]+)_(?P<ini>\d{4}-\d{2}-\d{2})_(?P<fim>\d{4}-\d{2}-\d{2})(?:_(?P<hora>\d{6}))?\.json$"
+    )
+
+    candidatos: list[tuple[str, str, str, float, str]] = []
+    for nome in os.listdir(pasta):
+        m = rx.fullmatch(nome)
+        if not m:
+            continue
+        uf_arq = (m.group("uf") or "").upper()
+        mun_arq = (m.group("mun") or "").lower()
+        if uf_norm and uf_arq != uf_norm:
+            continue
+        if mun_norm and mun_arq != mun_norm:
+            continue
+        ini = m.group("ini")
+        fim = m.group("fim")
+        hora = m.group("hora") or "000000"
+        caminho = os.path.join(pasta, nome)
+        try:
+            mtime = os.path.getmtime(caminho)
+        except Exception:
+            mtime = 0.0
+        candidatos.append((fim, ini, hora, mtime, caminho))
+
+    if not candidatos:
+        return None
+    candidatos.sort()
+    return candidatos[-1][4]
+
 def _preco_para_combustivel(item: object, combustivel: str) -> float | None:
     if not isinstance(item, dict):
         return None
@@ -309,3 +348,22 @@ def posto_por_id(posto_id: str, x_api_key: str | None = Security(api_key_header)
 @app.get("/api/health", tags=["Sistema"], summary="Health check")
 def health():
     return {"status": "ok"}
+
+
+@app.get(
+    "/api/anp/municipios",
+    tags=["ANP"],
+    summary="Retorna o JSON ANP (MUNICIPIOS) mais recente para uf/municipio",
+)
+def anp_municipios(
+    uf: str = "SC", municipio: str = "JOINVILLE", x_api_key: str | None = Security(api_key_header)
+):
+    _checar_api_key(x_api_key)
+    caminho = _arquivo_anp_mais_recente(uf=uf, municipio=municipio)
+    if not caminho or not os.path.exists(caminho):
+        raise HTTPException(status_code=404, detail="Arquivo ANP não encontrado")
+    try:
+        with open(caminho, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Falha ao ler JSON ANP")

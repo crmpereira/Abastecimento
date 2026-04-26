@@ -12,6 +12,8 @@ import { Appbar, Button, Card, Chip, Menu, Text, useTheme } from "react-native-p
 import * as Location from "expo-location";
 import {
   CombustivelFiltro,
+  AnpMunicipiosApi,
+  fetchAnpMunicipios,
   fetchPostosResumoPorCombustivel,
   getApiBaseUrl,
   PostoApi,
@@ -78,6 +80,23 @@ function formatPrecoNumero(valor: number | null | undefined): string {
   return valor.toFixed(2).replace(".", ",");
 }
 
+function anpPrecoNumero(valor: number | null | undefined): string {
+  if (typeof valor !== "number" || !Number.isFinite(valor)) return "—";
+  return valor.toFixed(2).replace(".", ",");
+}
+
+function normKey(s: string): string {
+  return (s || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+const COR_PRECO_ANP_MAIOR = "#DC2626";
+const COR_PRECO_ANP_MENOR_IGUAL = "#2563EB";
+
 function labelCombustivel(c: CombustivelFiltro): string {
   if (c === "etanol") return "Etanol";
   if (c === "diesel") return "Diesel";
@@ -98,8 +117,11 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
   const [postos, setPostos] = useState<PostoApi[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [anp, setAnp] = useState<AnpMunicipiosApi | null>(null);
+  const [erroAnp, setErroAnp] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [coords, setCoords] = useState<Coords | null>(null);
+  const [localAtual, setLocalAtual] = useState<string | null>(null);
   const [combustivel, setCombustivel] = useState<CombustivelFiltro>("gasolina");
   const [menuVisible, setMenuVisible] = useState(false);
   const [dataRef, setDataRef] = useState<string | null>(null);
@@ -113,9 +135,25 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
 
   const carregar = useCallback(async (c: CombustivelFiltro) => {
     setErro(null);
-    const resp = await fetchPostosResumoPorCombustivel(c);
-    setPostos(resp.postos);
-    setDataRef(resp.data ?? null);
+    setErroAnp(null);
+    const [postosResp, anpResp] = await Promise.allSettled([
+      fetchPostosResumoPorCombustivel(c),
+      fetchAnpMunicipios({ uf: "SC", municipio: "JOINVILLE" }),
+    ]);
+
+    if (postosResp.status === "rejected") {
+      throw postosResp.reason;
+    }
+
+    setPostos(postosResp.value.postos);
+    setDataRef(postosResp.value.data ?? null);
+
+    if (anpResp.status === "fulfilled") {
+      setAnp(anpResp.value);
+    } else {
+      setAnp(null);
+      setErroAnp(anpResp.reason?.message || "Falha ao carregar ANP");
+    }
   }, []);
 
   const refresh = useCallback(async () => {
@@ -163,14 +201,29 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
           setCoords(null);
+          setLocalAtual(null);
           return;
         }
         const pos = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,
         });
-        setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        setCoords({ lat, lon });
+        try {
+          const places = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
+          const p = places?.[0] ?? null;
+          const cidade = (p?.city || p?.subregion || "").trim();
+          const regiao = (p?.region || "").trim().replace("Santa Catarina", "SC");
+          const uf = (p as any)?.isoCountryCode ? String((p as any).isoCountryCode).trim() : "";
+          const label = [cidade, regiao].filter(Boolean).join("/");
+          setLocalAtual(label || uf || null);
+        } catch {
+          setLocalAtual(null);
+        }
       } catch {
         setCoords(null);
+        setLocalAtual(null);
       }
     })();
   }, []);
@@ -219,6 +272,42 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
     return melhor;
   }, [postosOrdenados, combustivel]);
 
+  const anpProdutos = useMemo(() => {
+    if (anp?.produtos && Array.isArray(anp.produtos)) return anp.produtos;
+    return [];
+  }, [anp]);
+
+  const anpPeriodoLabel = useMemo(() => {
+    const ini = anp?.periodo?.inicio ?? null;
+    const fim = anp?.periodo?.fim ?? null;
+    if (!ini || !fim) return "—";
+    return `${formatDia(ini)} a ${formatDia(fim)}`;
+  }, [anp]);
+
+  const anpPrecoMaxPorProduto = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of anpProdutos) {
+      const nome = typeof p?.produto === "string" ? p.produto : null;
+      const max = typeof p?.preco_max === "number" && Number.isFinite(p.preco_max) ? p.preco_max : null;
+      if (!nome || max === null) continue;
+      m.set(normKey(nome), max);
+    }
+    return m;
+  }, [anpProdutos]);
+
+  const precoAnpGasolinaComum = anpPrecoMaxPorProduto.get(normKey("GASOLINA COMUM")) ?? null;
+  const precoAnpGasolinaAdit = anpPrecoMaxPorProduto.get(normKey("GASOLINA ADITIVADA")) ?? null;
+  const precoAnpEtanol = anpPrecoMaxPorProduto.get(normKey("ETANOL HIDRATADO")) ?? null;
+  const precoAnpDieselS10 = anpPrecoMaxPorProduto.get(normKey("OLEO DIESEL S10")) ?? null;
+  const precoAnpDiesel = anpPrecoMaxPorProduto.get(normKey("OLEO DIESEL")) ?? null;
+
+  function corPorComparacao(valor: number | null | undefined, anpMax: number | null): string | null {
+    if (typeof valor !== "number" || !Number.isFinite(valor)) return null;
+    if (typeof anpMax !== "number" || !Number.isFinite(anpMax)) return null;
+    if (valor > anpMax) return COR_PRECO_ANP_MAIOR;
+    return COR_PRECO_ANP_MENOR_IGUAL;
+  }
+
   function abrirNoMapa(p: PostoApi) {
     const lat = p.coordenadas?.lat ?? null;
     const lon = p.coordenadas?.lon ?? null;
@@ -234,7 +323,10 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <Appbar.Header style={[styles.appbar, { backgroundColor: theme.colors.surface }]}>
-        <Appbar.Content title="Abastece Aqui" titleStyle={styles.appbarTitle} />
+        <Appbar.Content
+          title={localAtual ? `Abastece Aqui • ${localAtual}` : "Abastece Aqui"}
+          titleStyle={styles.appbarTitle}
+        />
         <Appbar.Action icon="refresh" onPress={refresh} />
         <Appbar.Action icon="logout" onPress={sair} />
       </Appbar.Header>
@@ -313,6 +405,71 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
                     Data: {formatDia(dataRef)}
                   </Chip>
                 </View>
+
+                <Card
+                  style={[
+                    styles.anpCard,
+                    { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant },
+                  ]}
+                >
+                  <Card.Content>
+                    <View style={styles.anpHeader}>
+                      <Text variant="titleSmall">ANP (municípios)</Text>
+                      <Text variant="bodySmall" style={styles.anpMeta}>
+                        {anp?.municipio ?? "JOINVILLE"}/{anp?.uf ?? "SC"} • Período: {anpPeriodoLabel}
+                      </Text>
+                    </View>
+
+                    {erroAnp ? (
+                      <Text variant="bodySmall">{erroAnp}</Text>
+                    ) : (
+                      <View style={styles.anpRows}>
+                        {anpProdutos.map((r, idx) => {
+                          const produto =
+                            (typeof r?.produto === "string" && r.produto.trim() ? r.produto.trim() : null) ??
+                            `Produto ${idx + 1}`;
+                          const unidade =
+                            typeof r?.unidade === "string" && r.unidade.trim() ? r.unidade.trim() : null;
+                          const minimo = typeof r?.preco_min === "number" ? r.preco_min : null;
+                          const maximo = typeof r?.preco_max === "number" ? r.preco_max : null;
+                          const postosPesq = typeof r?.postos_pesquisados === "number" ? r.postos_pesquisados : null;
+
+                          return (
+                            <View key={`${produto}-${idx}`} style={styles.anpRow}>
+                              <View style={styles.anpRowLeft}>
+                                <Text variant="bodySmall" style={styles.anpProduto}>
+                                  {produto}
+                                </Text>
+                                <Text variant="bodySmall" style={styles.anpSub}>
+                                  {postosPesq !== null ? `${Math.round(postosPesq)} postos` : "—"}
+                                  {unidade ? ` • ${unidade}` : ""}
+                                </Text>
+                              </View>
+                              <View style={styles.anpRowRight}>
+                                <View style={styles.anpPriceRow}>
+                                  <Text variant="bodySmall" style={styles.anpPriceLabel}>
+                                    Preço Min.
+                                  </Text>
+                                  <Text variant="bodySmall" style={styles.anpPriceValue}>
+                                    {anpPrecoNumero(minimo)}
+                                  </Text>
+                                </View>
+                                <View style={styles.anpPriceRow}>
+                                  <Text variant="bodySmall" style={styles.anpPriceLabel}>
+                                    Preço Máx.
+                                  </Text>
+                                  <Text variant="bodySmall" style={styles.anpPriceValue}>
+                                    {anpPrecoNumero(maximo)}
+                                  </Text>
+                                </View>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </Card.Content>
+                </Card>
               </View>
             }
             ListEmptyComponent={
@@ -359,31 +516,83 @@ export function PostosScreen({ onLogout }: PostosScreenProps) {
 
                         <View style={styles.boardRow}>
                           <Text style={styles.boardLabel}>GASOLINA COMUM</Text>
-                          <Text style={styles.boardValue}>
+                          {(() => {
+                            const cor = corPorComparacao(p?.gasolina_comum ?? null, precoAnpGasolinaComum);
+                            return (
+                          <Text
+                            style={[
+                              styles.boardValue,
+                              cor ? { color: cor } : null,
+                            ]}
+                          >
                             {formatPrecoNumero(p?.gasolina_comum ?? null)}
                           </Text>
+                            );
+                          })()}
                         </View>
                         <View style={styles.boardRow}>
                           <Text style={styles.boardLabel}>GASOLINA ADIT.</Text>
-                          <Text style={styles.boardValue}>
+                          {(() => {
+                            const cor = corPorComparacao(p?.gasolina_aditivada ?? null, precoAnpGasolinaAdit);
+                            return (
+                          <Text
+                            style={[
+                              styles.boardValue,
+                              cor ? { color: cor } : null,
+                            ]}
+                          >
                             {formatPrecoNumero(p?.gasolina_aditivada ?? null)}
                           </Text>
+                            );
+                          })()}
                         </View>
                         <View style={styles.boardRow}>
                           <Text style={styles.boardLabel}>ETANOL</Text>
-                          <Text style={styles.boardValue}>{formatPrecoNumero(p?.etanol ?? null)}</Text>
+                          {(() => {
+                            const cor = corPorComparacao(p?.etanol ?? null, precoAnpEtanol);
+                            return (
+                          <Text
+                            style={[
+                              styles.boardValue,
+                              cor ? { color: cor } : null,
+                            ]}
+                          >
+                            {formatPrecoNumero(p?.etanol ?? null)}
+                          </Text>
+                            );
+                          })()}
                         </View>
                         <View style={styles.boardRow}>
                           <Text style={styles.boardLabel}>DIESEL S10</Text>
-                          <Text style={styles.boardValue}>
+                          {(() => {
+                            const cor = corPorComparacao(p?.diesel_s10 ?? null, precoAnpDieselS10);
+                            return (
+                          <Text
+                            style={[
+                              styles.boardValue,
+                              cor ? { color: cor } : null,
+                            ]}
+                          >
                             {formatPrecoNumero(p?.diesel_s10 ?? null)}
                           </Text>
+                            );
+                          })()}
                         </View>
                         <View style={styles.boardRow}>
                           <Text style={styles.boardLabel}>DIESEL S500</Text>
-                          <Text style={styles.boardValue}>
+                          {(() => {
+                            const cor = corPorComparacao(p?.diesel_s500 ?? null, precoAnpDiesel);
+                            return (
+                          <Text
+                            style={[
+                              styles.boardValue,
+                              cor ? { color: cor } : null,
+                            ]}
+                          >
                             {formatPrecoNumero(p?.diesel_s500 ?? null)}
                           </Text>
+                            );
+                          })()}
                         </View>
                       </View>
                     </Card.Content>
@@ -421,6 +630,29 @@ const styles = StyleSheet.create({
   pills: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   pill: { borderRadius: 999 },
   pillText: { fontSize: 12, opacity: 0.85 },
+  anpCard: { marginTop: 10, borderRadius: 18, borderWidth: 1 },
+  anpHeader: { marginBottom: 8 },
+  anpMeta: { opacity: 0.8, marginTop: 2 },
+  anpRows: { gap: 8 },
+  anpRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(2, 6, 23, 0.10)",
+  },
+  anpRowLeft: { flex: 1, minWidth: 0 },
+  anpProduto: { fontWeight: "700" },
+  anpSub: { opacity: 0.75, marginTop: 1 },
+  anpRowRight: { alignItems: "flex-end" },
+  anpPriceRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 1 },
+  anpPriceLabel: { opacity: 0.75 },
+  anpPriceValue: {
+    fontWeight: "800",
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+  },
   empty: { paddingTop: 24, paddingBottom: 24, alignItems: "center" },
   columnWrapper: { gap: 10 },
   cardWrap: { flex: 1, minWidth: 220, paddingTop: 6 },

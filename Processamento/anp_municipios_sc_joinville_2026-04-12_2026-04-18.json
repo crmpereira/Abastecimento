@@ -1,0 +1,76 @@
+{
+  "schema_version": 2,
+  "fonte_url": "https://www.gov.br/anp/pt-br/assuntos/precos-e-defesa-da-concorrencia/precos/arquivos-lpc/2026/resumo_semanal_lpc_2026-04-12-2026-04-18.xlsx",
+  "gerado_em": "2026-04-26T16:20:54-03:00",
+  "uf": "SC",
+  "estado": "SANTA CATARINA",
+  "municipio": "JOINVILLE",
+  "periodo": {
+    "inicio": "2026-04-12",
+    "fim": "2026-04-18"
+  },
+  "planilha": "MUNICIPIOS",
+  "total_produtos": 5,
+  "produtos": [
+    {
+      "produto": "ETANOL HIDRATADO",
+      "unidade": "R$/l",
+      "postos_pesquisados": 15,
+      "preco_medio": 4.85,
+      "preco_min": 4.49,
+      "preco_max": 4.99,
+      "desvio_padrao": 0.17520871906984314,
+      "coef_variacao": 0.036,
+      "data_inicial": "2026-04-12",
+      "data_final": "2026-04-18"
+    },
+    {
+      "produto": "GASOLINA ADITIVADA",
+      "unidade": "R$/l",
+      "postos_pesquisados": 18,
+      "preco_medio": 6.79,
+      "preco_min": 6.27,
+      "preco_max": 7.09,
+      "desvio_padrao": 0.18417187908514068,
+      "coef_variacao": 0.027,
+      "data_inicial": "2026-04-12",
+      "data_final": "2026-04-18"
+    },
+    {
+      "produto": "GASOLINA COMUM",
+      "unidade": "R$/l",
+      "postos_pesquisados": 19,
+      "preco_medio": 6.7,
+      "preco_min": 6.27,
+      "preco_max": 6.79,
+      "desvio_padrao": 0.13214381674559578,
+      "coef_variacao": 0.02,
+      "data_inicial": "2026-04-12",
+      "data_final": "2026-04-18"
+    },
+    {
+      "produto": "OLEO DIESEL",
+      "unidade": "R$/l",
+      "postos_pesquisados": 4,
+      "preco_medio": 7.07,
+      "preco_min": 6.75,
+      "preco_max": 7.37,
+      "desvio_padrao": 0.2537058664411737,
+      "coef_variacao": 0.036,
+      "data_inicial": "2026-04-12",
+      "data_final": "2026-04-18"
+    },
+    {
+      "produto": "OLEO DIESEL S10",
+      "unidade": "R$/l",
+      "postos_pesquisados": 12,
+      "preco_medio": 7.44,
+      "preco_min": 7.19,
+      "preco_max": 7.8,
+      "desvio_padrao": 0.20947806712412775,
+      "coef_variacao": 0.028,
+      "data_inicial": "2026-04-12",
+      "data_final": "2026-04-18"
+    }
+  ]
+}
